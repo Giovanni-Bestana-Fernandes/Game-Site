@@ -349,9 +349,10 @@ export class EnergyBlock {
 }
 
 // Um bloco do quebra-cabeça de memória (estilo Simon). `index` é a posição dele
-// dentro de `level.memoryPuzzle.blocks`/`sequence`; a lógica do jogo (acender em
-// sequência, checar acerto/erro) vive em level.js — este bloco só guarda seu
-// próprio estado visual (aceso, flash de acerto/erro, resolvido).
+// dentro de `puzzle.blocks`/`puzzle.sequence`; a lógica do jogo (acender em sequência,
+// checar acerto/erro) vive em levelKit.js (createMemoryPuzzle/updateMemoryPuzzle/
+// registerPuzzleHeadbump) — este bloco só guarda seu próprio estado visual (aceso,
+// flash de acerto/erro, resolvido).
 export class PuzzleBlock {
   constructor({ x, y, col, row, index, color, width = 32, height = 32 }) {
     this.x = x;
@@ -400,7 +401,8 @@ export class PuzzleBlock {
   }
 }
 
-// Botão/interruptor ativado com E (não por cabeçada) — liga a uma `level.gate`.
+// Botão/interruptor ativado com E (não por cabeçada) — associado a um portão criado
+// com `createButtonGate` (levelKit.js), que abre com `openGate` quando o jogador interage.
 export class Button {
   constructor({ x, y, width = 28, height = 22 }) {
     this.x = x;
@@ -429,4 +431,62 @@ export class Button {
     ctx.fillStyle = this.pressed ? '#3fae55' : '#c94b4b';
     ctx.fillRect(sx + this.width / 2 - 4, leverY, 8, leverHeight);
   }
+}
+
+// NPC genérico de "diálogo com escolha" (a vaca da fase 1 é só um caso deste padrão).
+// O visual é 100% injetado via `draw(ctx, sx, sy, width, height)` — quem cria o NPC decide
+// a aparência; este objeto só cuida de posição, estado da escolha e textos.
+// `helped` começa `null` (ainda não decidido); vira `true`/`false` conforme a escolha.
+export class Npc {
+  constructor({
+    x,
+    y,
+    width = 32,
+    height = 32,
+    introText,
+    helpLabel = 'Ajudar',
+    refuseLabel = 'Recusar',
+    helpText = '',
+    refuseTitle = 'FIM DE JOGO',
+    refuseText = '',
+    followOffset = 44,
+    followSpeed = 190,
+    draw,
+  }) {
+    this.x = x;
+    this.y = y;
+    this.width = width;
+    this.height = height;
+    this.introText = introText;
+    this.helpLabel = helpLabel;
+    this.refuseLabel = refuseLabel;
+    this.helpText = helpText;
+    this.refuseTitle = refuseTitle;
+    this.refuseText = refuseText;
+    this.followOffset = followOffset;
+    this.followSpeed = followSpeed;
+    this.helped = null;
+    this.customDraw = draw;
+  }
+
+  get bounds() {
+    return { x: this.x, y: this.y, width: this.width, height: this.height };
+  }
+
+  draw(ctx, camera) {
+    const sx = Math.round(this.x - camera.x);
+    const sy = Math.round(this.y - camera.y);
+    this.customDraw(ctx, sx, sy, this.width, this.height);
+  }
+}
+
+// Faz um NPC (já ajudado) seguir o jogador como um pet, a uma distância fixa atrás dele
+// (do lado de onde ele veio). Reaproveitável por qualquer NPC/companheiro de qualquer fase.
+export function updateCompanionFollow(npc, player, dt) {
+  if (!npc || npc.helped !== true) return;
+  const targetX = player.x - player.facing * npc.followOffset;
+  const step = npc.followSpeed * dt;
+  const dx = targetX - npc.x;
+  if (Math.abs(dx) <= step) npc.x = targetX;
+  else npc.x += Math.sign(dx) * step;
 }

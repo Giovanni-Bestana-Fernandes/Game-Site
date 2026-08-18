@@ -1,4 +1,4 @@
-import { TILE_SIZE } from './level.js';
+import { TILE_SIZE } from './levelKit.js';
 
 export function drawBackground(ctx, canvas, level, camera) {
   const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
@@ -82,20 +82,6 @@ export function drawTerminals(ctx, level, camera) {
     ctx.textAlign = 'center';
     ctx.fillText('!', screenX + terminal.width / 2, screenY + terminal.height / 2 - 2);
   }
-}
-
-export function drawCow(ctx, level, camera) {
-  const cow = level.cow;
-  const screenX = cow.x - camera.x;
-  const screenY = cow.y - camera.y;
-
-  ctx.fillStyle = '#f5f5f5';
-  ctx.fillRect(screenX, screenY, cow.width, cow.height);
-  ctx.fillStyle = '#2b2b2b';
-  ctx.fillRect(screenX + 4, screenY + 4, 8, 8);
-  ctx.fillRect(screenX + 18, screenY + 14, 10, 8);
-  ctx.fillStyle = '#e79fb0';
-  ctx.fillRect(screenX + cow.width - 8, screenY + cow.height - 4, 8, 6);
 }
 
 export function drawExitHatch(ctx, level, camera) {

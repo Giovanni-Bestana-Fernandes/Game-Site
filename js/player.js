@@ -1,4 +1,4 @@
-import { TILE_SIZE, isSolidTile } from './level.js';
+import { TILE_SIZE, isSolidTile } from './levelKit.js';
 import {
   WALK_SPEED,
   RUN_SPEED,
