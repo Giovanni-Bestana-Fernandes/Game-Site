@@ -1,7 +1,7 @@
 // Kit genérico de construção de nível — nada aqui é específico da fase 1.
 // Uma fase nova (js/levels/faseX.js) monta seu grid/objetos chamando essas funções;
 // o "motor" do jogo (js/game.js) só sabe consumir o formato que elas produzem.
-import { PuzzleBlock, Button } from './entities.js';
+import { PuzzleBlock, Button, Target, TrampolinePad, PressurePlate } from './entities.js';
 import { JUMP_VELOCITY, GRAVITY, STAND_HEIGHT, WALK_SPEED, MAX_JUMP_HEIGHT } from './physics.js';
 
 export const TILE_SIZE = 32;
@@ -37,6 +37,12 @@ export function fillGroundRow(grid, row, fromCol, toCol) {
   for (let x = fromCol; x <= toCol; x++) {
     grid[row][x] = SOLID;
   }
+}
+
+// Parede vertical sólida — usada tanto pra portões (ver createButtonGate) quanto pra
+// estruturas puramente decorativas/de bloqueio, como a torre da fase 2.
+export function buildWall(grid, col, fromRow, toRow) {
+  for (let row = fromRow; row <= toRow; row++) grid[row][col] = SOLID;
 }
 
 // `fromTopY` é a superfície (topo de tile) de onde o jogador está pulando — chão ou
@@ -137,20 +143,73 @@ export function buildStarfield(pixelWidth, pixelHeight, count) {
   return stars;
 }
 
+// Parede-portão crua: só a forma `{col, rows, open}` compartilhada por todo tipo de
+// portão (botão, pressão, onda de minions) — cada um decide o QUANDO abrir.
+export function createGate(grid, gateCol, gateRows) {
+  const gate = { col: gateCol, rows: gateRows, open: false };
+  for (const row of gateRows) grid[row][gateCol] = SOLID;
+  return gate;
+}
+
 // Portão + botão: o portão é uma parede sólida comum (mais alta que o pulo alcança,
 // então não dá pra pular por cima) que só abre quando alguém chama openGate — o motor
 // do jogo faz isso quando o jogador interage com o botão associado.
 export function createButtonGate({ grid, buttonX, buttonY, gateCol, gateRows }) {
-  const gate = { col: gateCol, rows: gateRows, open: false };
-  for (const row of gateRows) grid[row][gateCol] = SOLID;
+  const gate = createGate(grid, gateCol, gateRows);
   const button = new Button({ x: buttonX, y: buttonY });
   return { button, gate };
 }
 
+// Onda de minions: o portão abre sozinho (sem botão) assim que todo mundo em `minions`
+// estiver morto (`m.dead`, ver checkMinionWaves em game.js) — pensado pra clusters de
+// Robot/Alien reaproveitados como "monstros de baixo nível" no início de um confronto.
+export function createMinionWave({ grid, gateCol, gateRows, minions }) {
+  const gate = createGate(grid, gateCol, gateRows);
+  return { minions, gate, cleared: false };
+}
+
+// Abre ou fecha um portão diretamente (usado pelo portão de pressão, que alterna
+// conforme tem peso em cima ou não). `openGate` é o caso comum (só abre, uma vez).
+export function setGateOpen(grid, gate, open) {
+  gate.open = open;
+  for (const row of gate.rows) grid[row][gate.col] = open ? EMPTY : SOLID;
+}
+
 export function openGate(grid, gate) {
   if (gate.open) return;
-  gate.open = true;
-  for (const row of gate.rows) grid[row][gate.col] = EMPTY;
+  setGateOpen(grid, gate, true);
+}
+
+// Botão de pressão + portão: o portão fica aberto só enquanto tiver peso na plaquinha
+// (jogador ou um companheiro parado nela com o comando de "esperar aqui") — quem checa
+// isso a cada frame e chama setGateOpen é o motor (updatePressureGates em game.js).
+export function createPressureGate({ grid, plateX, plateY, gateCol, gateRows }) {
+  const gate = createGate(grid, gateCol, gateRows);
+  const plate = new PressurePlate({ x: plateX, y: plateY });
+  return { plate, gate };
+}
+
+// Alvo atirável + trampolim: o trampolim só quica de verdade depois que o alvo é
+// atingido por uma bala (ver checkPlayerBulletHits em game.js, que faz
+// `target.hit = true; pad.active = true;`). Nenhum dos dois marca o grid como sólido —
+// são só objetos flutuando sobre o chão já existente.
+export function createShootableTrampoline({ targetX, targetY, padX, padY }) {
+  return {
+    target: new Target({ x: targetX, y: targetY }),
+    pad: new TrampolinePad({ x: padX, y: padY }),
+  };
+}
+
+// Cercado: um grupo de companheiros parados ali (`companions`, já prontos — `new
+// Companion({...})`) até o jogador interagir com o gatilho (`trigger`, um retângulo
+// qualquer) — aí eles entram na fila de seguimento (ver findNearbyCorral/handleInteract
+// em game.js, que empurra `corral.companions` pra dentro de `level.companions`).
+export function createCorral({ triggerX, triggerY, triggerWidth = 32, triggerHeight = 32, companions }) {
+  return {
+    trigger: { x: triggerX, y: triggerY, width: triggerWidth, height: triggerHeight },
+    companions,
+    released: false,
+  };
 }
 
 // Quebra-cabeça de memória (estilo Simon): `blockCols` vira um bloco cada, acendendo na

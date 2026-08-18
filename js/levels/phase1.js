@@ -14,6 +14,8 @@ import {
   createMemoryPuzzle,
 } from '../levelKit.js';
 
+
+
 // Desenho da vaca — só a fase 1 sabe como ela se parece; pro motor do jogo ela é só
 // um Npc genérico (posição, textos da escolha, "segue como pet").
 function drawCowShape(ctx, sx, sy, width, height) {
@@ -190,6 +192,7 @@ export function createLevel1() {
     tractorBeams,
     buttonGates,
     puzzles,
+    companions: [],
     npc,
     exitHatch,
     playerStart,

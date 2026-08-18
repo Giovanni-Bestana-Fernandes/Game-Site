@@ -18,7 +18,12 @@ export function drawBackground(ctx, canvas, level, camera) {
   ctx.globalAlpha = 1;
 }
 
+// Paleta padrão dos tiles — uma fase pode passar `level.tileColors` (mesmas 4 chaves)
+// pra ter um "cenário" visualmente diferente sem duplicar essa função.
+const DEFAULT_TILE_COLORS = { top: '#3d4a5c', under: '#1c222c', edge: '#7fd6e0', bottom: '#252c38' };
+
 export function drawLevel(ctx, level, camera) {
+  const colors = level.tileColors ?? DEFAULT_TILE_COLORS;
   const firstCol = Math.floor(camera.x / TILE_SIZE);
   const lastCol = Math.ceil((camera.x + camera.viewWidth) / TILE_SIZE);
   const firstRow = Math.floor(camera.y / TILE_SIZE);
@@ -31,13 +36,13 @@ export function drawLevel(ctx, level, camera) {
       const screenY = Math.round(row * TILE_SIZE - camera.y);
       const isTopTile = row === 0 || level.grid[row - 1][col] !== 1;
 
-      ctx.fillStyle = isTopTile ? '#3d4a5c' : '#1c222c';
+      ctx.fillStyle = isTopTile ? colors.top : colors.under;
       ctx.fillRect(screenX, screenY, TILE_SIZE, TILE_SIZE);
 
       if (isTopTile) {
-        ctx.fillStyle = '#7fd6e0';
+        ctx.fillStyle = colors.edge;
         ctx.fillRect(screenX, screenY, TILE_SIZE, 3);
-        ctx.fillStyle = '#252c38';
+        ctx.fillStyle = colors.bottom;
         ctx.fillRect(screenX, screenY + TILE_SIZE - 4, TILE_SIZE, 4);
       } else {
         ctx.strokeStyle = 'rgba(0,0,0,0.25)';
@@ -112,6 +117,32 @@ export function drawGate(ctx, gate, camera) {
   ctx.strokeStyle = 'rgba(255, 140, 60, 0.9)';
   ctx.lineWidth = 3;
   ctx.strokeRect(screenX + 2, topY + 2, TILE_SIZE - 4, bottomY - topY - 4);
+}
+
+// Desenha a cerca de um cercado (ver createCorral em levelKit.js) ao redor de uma área
+// retangular — some assim que `released` vira true (os companheiros já saíram andando).
+export function drawCorral(ctx, corral, camera) {
+  if (corral.released) return;
+  const area = corral.trigger;
+  const screenX = area.x - camera.x - 24;
+  const screenY = area.y - camera.y - 60;
+  const width = area.width + 48;
+  const height = 90;
+
+  ctx.strokeStyle = '#a9784f';
+  ctx.lineWidth = 3;
+  for (let x = 0; x <= width; x += 20) {
+    ctx.beginPath();
+    ctx.moveTo(screenX + x, screenY + height);
+    ctx.lineTo(screenX + x, screenY + height - 34);
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.moveTo(screenX, screenY + height - 24);
+  ctx.lineTo(screenX + width, screenY + height - 24);
+  ctx.moveTo(screenX, screenY + height - 8);
+  ctx.lineTo(screenX + width, screenY + height - 8);
+  ctx.stroke();
 }
 
 export function drawInteractPrompt(ctx, worldX, worldY, camera, label = 'E') {

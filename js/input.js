@@ -74,4 +74,10 @@ export class Input {
   get pausePressed() {
     return this.wasPressed('Escape');
   }
+
+  // Comanda os companheiros (ver level.companions) a esperar parados ou a voltar a
+  // seguir — alterna a cada aperto.
+  get commandPressed() {
+    return this.wasPressed('KeyC');
+  }
 }

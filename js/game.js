@@ -7,7 +7,7 @@ import { Input } from './input.js';
 import { Player } from './player.js';
 import { Camera } from './camera.js';
 import { Projectile, updateCompanionFollow } from './entities.js';
-import { openGate, updateMemoryPuzzle, registerPuzzleHeadbump } from './levelKit.js';
+import { openGate, setGateOpen, updateMemoryPuzzle, registerPuzzleHeadbump } from './levelKit.js';
 import {
   drawBackground,
   drawLevel,
@@ -15,6 +15,7 @@ import {
   drawTerminals,
   drawGate,
   drawExitHatch,
+  drawCorral,
   drawInteractPrompt,
 } from './render.js';
 
@@ -36,6 +37,14 @@ const BULLET_COLOR = '#fff2a8';
 // até a origem do feixe (o pequeno emissor no topo) e só aí mostra a morte.
 const CAPTURE_DURATION = 1.1;
 
+// Impulso do trampolim — bem mais forte que o pulo normal (ver player.js JUMP_VELOCITY).
+const TRAMPOLINE_BOUNCE_VELOCITY = -820;
+const TRAMPOLINE_BOUNCE_SQUASH = 0.3;
+
+// Dano de cada bala do jogador contra um chefe (ver Boss.takeDamage em entities.js).
+const BOSS_BULLET_DAMAGE = 12;
+const BOSS_INTRO_TRANSLATE_DELAY_MS = 2200;
+
 export function startGame(createLevel) {
   const canvas = document.getElementById('game-canvas');
   const ctx = canvas.getContext('2d');
@@ -51,6 +60,12 @@ export function startGame(createLevel) {
   const endTextEl = document.getElementById('end-text');
   const endRestartBtn = document.getElementById('end-restart');
   const pauseOverlayEl = document.getElementById('pause-overlay');
+  const bossHealthEl = document.getElementById('boss-health');
+  const bossNameEl = document.getElementById('boss-name');
+  const bossHealthFillEl = document.getElementById('boss-health-fill');
+  const bossIntroEl = document.getElementById('boss-intro');
+  const bossIntroTextEl = document.getElementById('boss-intro-text');
+  const bossIntroContinueBtn = document.getElementById('boss-intro-continue');
 
   const input = new Input();
   const camera = new Camera(canvas.width, canvas.height);
@@ -171,6 +186,110 @@ export function startGame(createLevel) {
     return rectOverlap(player.bounds, level.exitHatch);
   }
 
+  function findNearbyCorral() {
+    const center = playerCenter();
+    for (const corral of level.corrals) {
+      if (corral.released) continue;
+      const t = corral.trigger;
+      const cx = t.x + t.width / 2;
+      const cy = t.y + t.height / 2;
+      if (distanceTo(center.x, center.y, cx, cy) < INTERACT_RANGE) return corral;
+    }
+    return null;
+  }
+
+  // Alterna todos os companheiros ativos entre "esperar aqui" (staying) e "seguir de
+  // novo" — usado, por exemplo, pra deixar um companheiro parado em cima de um botão
+  // de pressão enquanto o jogador segue sozinho (ver updatePressureGates).
+  function toggleCompanionsStay() {
+    if (level.companions.length === 0) return;
+    const shouldStay = !level.companions[0].staying;
+    for (const companion of level.companions) companion.staying = shouldStay;
+    flashMessage(shouldStay ? 'Os companheiros vão esperar aqui.' : 'Os companheiros vão te seguir de novo.', 1600);
+  }
+
+  function updateCompanions(dt) {
+    let leader = player;
+    for (const companion of level.companions) {
+      updateCompanionFollow(companion, leader, dt);
+      leader = companion;
+    }
+  }
+
+  function updatePressureGates() {
+    for (const pg of level.pressureGates) {
+      const weightPresent =
+        rectOverlap(player.bounds, pg.plate.bounds) || level.companions.some((c) => rectOverlap(c.bounds, pg.plate.bounds));
+      pg.plate.pressed = weightPresent;
+      setGateOpen(level.grid, pg.gate, weightPresent);
+    }
+  }
+
+  function checkTrampolines() {
+    for (const tr of level.trampolines) {
+      if (!tr.pad.active) continue;
+      if (player.vy >= 0 && rectOverlap(player.bounds, tr.pad.bounds)) {
+        player.vy = TRAMPOLINE_BOUNCE_VELOCITY;
+        player.grounded = false;
+        tr.pad.bounceTimer = TRAMPOLINE_BOUNCE_SQUASH;
+      }
+    }
+  }
+
+  // Onda de minions: abre o portão sozinho assim que todo mundo da leva estiver morto.
+  function checkMinionWaves() {
+    for (const wave of level.minionWaves) {
+      if (wave.cleared) continue;
+      if (wave.minions.every((m) => m.dead)) {
+        wave.cleared = true;
+        openGate(level.grid, wave.gate);
+      }
+    }
+  }
+
+  function findBossTrigger() {
+    if (!level.boss || level.boss.introDone || level.boss.defeatHandled) return null;
+    if (!level.bossTrigger) return null;
+    return rectOverlap(player.bounds, level.bossTrigger) ? level.bossTrigger : null;
+  }
+
+  // Diálogo do chefe: mostra o texto alienígena (ilegível de propósito) e troca sozinho
+  // pra tradução depois de um tempo — sem escolha, só uma pausa dramática antes da luta.
+  // As vacas que estavam seguindo são "capturadas" (somem de level.companions) pra não
+  // atrapalhar o combate; voltam quando o chefe é derrotado (ver handleBossDefeated).
+  function startBossIntro() {
+    const boss = level.boss;
+    gameState = 'bossintro';
+    camera.shake(0.9, 16);
+    level.capturedCompanions = level.companions;
+    level.companions = [];
+    bossNameEl.textContent = boss.name;
+    bossIntroTextEl.textContent = boss.alienText;
+    bossIntroEl.classList.remove('hidden');
+    setTimeout(() => {
+      if (gameState === 'bossintro') bossIntroTextEl.textContent = boss.translatedText;
+    }, BOSS_INTRO_TRANSLATE_DELAY_MS);
+  }
+
+  function closeBossIntro() {
+    if (gameState !== 'bossintro') return;
+    bossIntroEl.classList.add('hidden');
+    gameState = 'playing';
+    level.boss.introDone = true;
+  }
+
+  function handleBossDefeated() {
+    const boss = level.boss;
+    if (boss.defeatHandled) return;
+    boss.defeatHandled = true;
+    level.companions = level.capturedCompanions ?? [];
+    level.capturedCompanions = [];
+    level.tractorBeams = []; // feixes de abdução do estágio 3 não devem sobreviver ao chefe
+    projectiles = []; // criaturas/socos/bolas de energia já disparados também não
+    if (level.bossExitGate) openGate(level.grid, level.bossExitGate);
+    flashMessage('As vacas foram libertadas! Leve-as até a nave.', 3200);
+  }
+
   function togglePause() {
     if (gameState === 'playing') {
       gameState = 'paused';
@@ -265,6 +384,28 @@ export function startGame(createLevel) {
         }
       }
     }
+    for (const bullet of playerBullets) {
+      if (bullet.dead) continue;
+      for (const tr of level.trampolines) {
+        if (!tr.target.hit && rectOverlap(bullet.bounds, tr.target.bounds)) {
+          tr.target.hit = true;
+          tr.pad.active = true;
+          bullet.dead = true;
+          flashMessage('Trampolim ativado!', 1500);
+          break;
+        }
+      }
+    }
+    if (level.boss && !level.boss.dead && level.boss.bounds) {
+      for (const bullet of playerBullets) {
+        if (bullet.dead) continue;
+        if (rectOverlap(bullet.bounds, level.boss.bounds)) {
+          level.boss.takeDamage(BOSS_BULLET_DAMAGE);
+          bullet.dead = true;
+          if (level.boss.dead) handleBossDefeated();
+        }
+      }
+    }
   }
 
   function openNpcDialogue() {
@@ -282,6 +423,7 @@ export function startGame(createLevel) {
     choiceBoxEl.classList.add('hidden');
     if (helped) {
       gameState = 'playing';
+      level.companions.push(npc);
       flashMessage(npc.helpText, 3200);
     } else {
       gameState = 'gameover';
@@ -301,7 +443,7 @@ export function startGame(createLevel) {
     showEndScreen('VOCÊ MORREU!', '', null);
   }
 
-  function handleInteract(nearbyTerminal, nearbyButtonGate) {
+  function handleInteract(nearbyTerminal, nearbyButtonGate, nearbyCorral) {
     if (openMessage && openMessage.terminal) {
       const terminal = openMessage.terminal;
       const cx = terminal.x + terminal.width / 2;
@@ -330,6 +472,13 @@ export function startGame(createLevel) {
       return;
     }
 
+    if (nearbyCorral) {
+      nearbyCorral.released = true;
+      level.companions.push(...nearbyCorral.companions);
+      flashMessage('Companheiros libertos! Eles vão te seguir.', 2000);
+      return;
+    }
+
     if (nearbyButtonGate) {
       openGate(level.grid, nearbyButtonGate.gate);
       nearbyButtonGate.button.pressed = true;
@@ -352,6 +501,7 @@ export function startGame(createLevel) {
     for (const beam of level.tractorBeams) {
       if (rectOverlap(player.bounds, beam.bounds)) return startCapture(beam);
     }
+    if (level.boss && level.boss.bounds && rectOverlap(player.bounds, level.boss.bounds)) return killPlayer();
     for (const projectile of projectiles) {
       if (!projectile.dead && rectOverlap(player.bounds, projectile.bounds)) {
         projectile.dead = true;
@@ -362,6 +512,16 @@ export function startGame(createLevel) {
 
   function resetGame() {
     level = createLevel();
+    // Padrão seguro caso uma fase não defina algum desses (todos opcionais no contrato).
+    level.companions ??= [];
+    level.corrals ??= [];
+    level.pressureGates ??= [];
+    level.trampolines ??= [];
+    level.minionWaves ??= [];
+    level.boss ??= null;
+    level.bossTrigger ??= null;
+    level.bossExitGate ??= null;
+    level.capturedCompanions ??= [];
     player = new Player(level.playerStart.x, level.playerStart.y);
     projectiles = [];
     playerBullets = [];
@@ -378,12 +538,15 @@ export function startGame(createLevel) {
     endStarsEl.classList.add('hidden');
     endStarsEl.innerHTML = '';
     pauseOverlayEl.classList.add('hidden');
+    bossHealthEl.classList.add('hidden');
+    bossIntroEl.classList.add('hidden');
     updateEnergyHUD();
     camera.follow(player, level);
   }
 
   choiceHelpBtn.addEventListener('click', () => resolveNpcChoice(true));
   choiceRefuseBtn.addEventListener('click', () => resolveNpcChoice(false));
+  bossIntroContinueBtn.addEventListener('click', () => closeBossIntro());
   endRestartBtn.addEventListener('click', () => resetGame());
 
   let lastTime = performance.now();
@@ -394,12 +557,13 @@ export function startGame(createLevel) {
 
     let nearbyTerminal = null;
     let nearbyButtonGate = null;
+    let nearbyCorral = null;
 
     if (input.pausePressed) togglePause();
 
     if (gameState === 'captured') {
       updateCapture(dt);
-      camera.follow(player, level);
+      camera.follow(player, level, dt);
     }
 
     if (gameState === 'playing') {
@@ -417,12 +581,17 @@ export function startGame(createLevel) {
       for (const alien of level.aliens) alien.update(dt, player, projectiles);
       for (const beam of level.tractorBeams) beam.update(dt);
       for (const block of level.energyBlocks) block.update(dt);
+      if (level.boss) level.boss.update(dt, player, projectiles, level);
       for (const projectile of projectiles) projectile.update(dt, level);
       projectiles = projectiles.filter((p) => !p.dead);
       for (const puzzle of level.puzzles) updateMemoryPuzzle(puzzle, dt);
-      updateCompanionFollow(level.npc, player, dt);
+      for (const tr of level.trampolines) tr.pad.update(dt);
+      updateCompanions(dt);
+      updatePressureGates();
+      checkMinionWaves();
 
       if (input.shootPressed) shootBullet();
+      if (input.commandPressed) toggleCompanionsStay();
       for (const bullet of playerBullets) bullet.update(dt, level);
       checkPlayerBulletHits();
       playerBullets = playerBullets.filter((b) => !b.dead);
@@ -433,14 +602,18 @@ export function startGame(createLevel) {
         killPlayer();
       } else {
         checkHazards();
+        checkTrampolines();
       }
 
-      camera.follow(player, level);
+      camera.follow(player, level, dt);
 
       if (gameState === 'playing') {
+        const bossTrigger = findBossTrigger();
+        if (bossTrigger) startBossIntro();
         nearbyTerminal = findNearbyTerminal();
         nearbyButtonGate = findNearbyButtonGate();
-        handleInteract(nearbyTerminal, nearbyButtonGate);
+        nearbyCorral = findNearbyCorral();
+        handleInteract(nearbyTerminal, nearbyButtonGate, nearbyCorral);
       }
     }
 
@@ -453,26 +626,50 @@ export function startGame(createLevel) {
     drawTerminals(ctx, level, camera);
     for (const bg of level.buttonGates) drawGate(ctx, bg.gate, camera);
     for (const puzzle of level.puzzles) drawGate(ctx, puzzle.gate, camera);
-    if (level.npc) level.npc.draw(ctx, camera);
+    for (const pg of level.pressureGates) drawGate(ctx, pg.gate, camera);
+    for (const wave of level.minionWaves) drawGate(ctx, wave.gate, camera);
+    if (level.bossExitGate) drawGate(ctx, level.bossExitGate, camera);
+    for (const corral of level.corrals) drawCorral(ctx, corral, camera);
+    if (level.npc && level.npc.helped === null) level.npc.draw(ctx, camera);
     drawExitHatch(ctx, level, camera);
 
     for (const block of level.energyBlocks) block.draw(ctx, camera);
     for (const puzzle of level.puzzles) for (const block of puzzle.blocks) block.draw(ctx, camera);
     for (const bg of level.buttonGates) bg.button.draw(ctx, camera);
+    for (const pg of level.pressureGates) pg.plate.draw(ctx, camera);
+    for (const tr of level.trampolines) {
+      tr.target.draw(ctx, camera);
+      tr.pad.draw(ctx, camera);
+    }
+    for (const corral of level.corrals) {
+      if (!corral.released) for (const companion of corral.companions) companion.draw(ctx, camera);
+    }
 
     for (const robot of level.robots) robot.draw(ctx, camera);
     for (const alien of level.aliens) alien.draw(ctx, camera);
     for (const beam of level.tractorBeams) beam.draw(ctx, camera);
+    if (level.boss) level.boss.draw(ctx, camera);
     for (const projectile of projectiles) projectile.draw(ctx, camera);
     for (const bullet of playerBullets) bullet.draw(ctx, camera);
+    for (const companion of level.companions) companion.draw(ctx, camera);
 
     player.draw(ctx, camera);
+
+    if (level.boss && level.boss.introDone && !level.boss.dead) {
+      bossHealthEl.classList.remove('hidden');
+      bossHealthFillEl.style.width = `${Math.max(0, (level.boss.hp / level.boss.maxHp) * 100)}%`;
+    } else {
+      bossHealthEl.classList.add('hidden');
+    }
 
     if (gameState === 'playing' && !openMessage) {
       if (nearbyTerminal) {
         drawInteractPrompt(ctx, nearbyTerminal.x + nearbyTerminal.width / 2, nearbyTerminal.y - 12, camera);
       } else if (isNearNpc()) {
         drawInteractPrompt(ctx, level.npc.x + level.npc.width / 2, level.npc.y - 12, camera);
+      } else if (nearbyCorral) {
+        const t = nearbyCorral.trigger;
+        drawInteractPrompt(ctx, t.x + t.width / 2, t.y - 12, camera);
       } else if (nearbyButtonGate) {
         const btn = nearbyButtonGate.button;
         drawInteractPrompt(ctx, btn.x + btn.width / 2, btn.y - 12, camera);

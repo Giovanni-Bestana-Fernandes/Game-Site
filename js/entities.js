@@ -466,6 +466,8 @@ export class Npc {
     this.followOffset = followOffset;
     this.followSpeed = followSpeed;
     this.helped = null;
+    this.staying = false;
+    this.facing = 1;
     this.customDraw = draw;
   }
 
@@ -480,13 +482,314 @@ export class Npc {
   }
 }
 
-// Faz um NPC (já ajudado) seguir o jogador como um pet, a uma distância fixa atrás dele
-// (do lado de onde ele veio). Reaproveitável por qualquer NPC/companheiro de qualquer fase.
-export function updateCompanionFollow(npc, player, dt) {
-  if (!npc || npc.helped !== true) return;
-  const targetX = player.x - player.facing * npc.followOffset;
-  const step = npc.followSpeed * dt;
-  const dx = targetX - npc.x;
-  if (Math.abs(dx) <= step) npc.x = targetX;
-  else npc.x += Math.sign(dx) * step;
+// Companheiro "puro" — igual ao Npc, mas sem diálogo/escolha: já nasce pronto pra seguir
+// (`helped = true`). É o que uma vaca liberada de um cercado (ver createCorral em
+// levelKit.js) ou um companheiro presente desde o início da fase deve usar.
+export class Companion {
+  constructor({ x, y, width = 32, height = 30, followOffset = 44, followSpeed = 190, draw }) {
+    this.x = x;
+    this.y = y;
+    this.width = width;
+    this.height = height;
+    this.followOffset = followOffset;
+    this.followSpeed = followSpeed;
+    this.helped = true;
+    this.staying = false;
+    this.facing = 1;
+    this.customDraw = draw;
+  }
+
+  get bounds() {
+    return { x: this.x, y: this.y, width: this.width, height: this.height };
+  }
+
+  draw(ctx, camera) {
+    const sx = Math.round(this.x - camera.x);
+    const sy = Math.round(this.y - camera.y);
+    this.customDraw(ctx, sx, sy, this.width, this.height);
+  }
+}
+
+// Faz um companheiro (Npc já ajudado, ou Companion) seguir um "líder" — o jogador, ou o
+// companheiro da frente dele na fila (assim dá pra formar uma fileira/comitiva: motor
+// chama isso encadeado, cada um seguindo o de trás do anterior). Fica parado no lugar
+// enquanto `staying` for true (ver comando de "esperar aqui" em js/game.js).
+export function updateCompanionFollow(companion, leader, dt) {
+  if (!companion || companion.helped !== true) return;
+  if (companion.staying) return;
+  const leaderFacing = leader.facing ?? 1;
+  const targetX = leader.x - leaderFacing * companion.followOffset;
+  const step = companion.followSpeed * dt;
+  const dx = targetX - companion.x;
+  if (Math.abs(dx) <= step) companion.x = targetX;
+  else companion.x += Math.sign(dx) * step;
+  if (Math.abs(dx) > 1) companion.facing = dx >= 0 ? 1 : -1;
+}
+
+// Alvo atirável (não por cabeçada — por bala, ver checkPlayerBulletHits em game.js).
+// Uma vez atingido fica intangível (bounds null) pra não poder ser "readisparado"; quem
+// cuida do que acontece ao ser atingido é o motor (ex.: ativar um TrampolinePad).
+export class Target {
+  constructor({ x, y, width = 22, height = 22 }) {
+    this.x = x;
+    this.y = y;
+    this.width = width;
+    this.height = height;
+    this.hit = false;
+  }
+
+  get bounds() {
+    if (this.hit) return null;
+    return { x: this.x, y: this.y, width: this.width, height: this.height };
+  }
+
+  draw(ctx, camera) {
+    const sx = Math.round(this.x - camera.x);
+    const sy = Math.round(this.y - camera.y);
+    const cx = sx + this.width / 2;
+    const cy = sy + this.height / 2;
+    const r = this.width / 2;
+
+    ctx.fillStyle = this.hit ? '#3a3f4a' : '#241014';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = this.hit ? '#5c6675' : '#ff5b6b';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r - 4, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = this.hit ? '#5c6675' : '#ff5b6b';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// Trampolim: só quica de verdade depois de `active` virar true (ver Target acima — o
+// motor liga os dois). `bounceTimer` é só o squash visual de "acabou de quicar".
+export class TrampolinePad {
+  constructor({ x, y, width = 36, height = 10 }) {
+    this.x = x;
+    this.y = y;
+    this.width = width;
+    this.height = height;
+    this.active = false;
+    this.bounceTimer = 0;
+  }
+
+  get bounds() {
+    return { x: this.x, y: this.y, width: this.width, height: this.height };
+  }
+
+  update(dt) {
+    if (this.bounceTimer > 0) this.bounceTimer = Math.max(0, this.bounceTimer - dt);
+  }
+
+  draw(ctx, camera) {
+    const sx = Math.round(this.x - camera.x);
+    const sy = Math.round(this.y - camera.y);
+    const squash = (this.bounceTimer / 0.3) * 5;
+
+    ctx.fillStyle = '#2b2f3a';
+    ctx.fillRect(sx - 4, sy + this.height - 4, this.width + 8, 8);
+    ctx.fillStyle = this.active ? '#ffb238' : '#4a4f58';
+    ctx.fillRect(sx, sy + squash, this.width, this.height - squash);
+    ctx.strokeStyle = this.active ? '#ffe0a0' : '#5c6675';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(sx, sy + squash, this.width, this.height - squash);
+  }
+}
+
+// Chefe de fase: 3 estágios (dentro do robô solta criaturas → armadura exposta soca/
+// atira bola de energia → ejetado, dispara feixes de abdução em posições aleatórias).
+// Fica intangível (bounds null) até `introDone` virar true (ver o diálogo alienígena em
+// game.js) e some de vez (ainda intangível) depois de morto. Dano/gatilho de troca de
+// estágio ficam aqui (`takeDamage`); o "o que fazer quando morre" (soltar as vacas
+// capturadas, etc.) é responsabilidade do motor.
+const BOSS_STAGE_THRESHOLDS = [0.66, 0.33]; // fração de vida restante que troca de estágio
+const BOSS_STAGE_ATTACK_COOLDOWN = [2.2, 1.8, 1.4];
+const BOSS_HOVER_SPEED = 40;
+
+export class Boss {
+  constructor({
+    x,
+    y,
+    width = 120,
+    height = 100,
+    maxHp = 180,
+    arenaMinX,
+    arenaMaxX,
+    groundY,
+    name = 'CHEFE',
+    alienText,
+    translatedText,
+  }) {
+    this.x = x;
+    this.y = y;
+    this.width = width;
+    this.height = height;
+    this.maxHp = maxHp;
+    this.hp = maxHp;
+    this.stage = 0;
+    this.arenaMinX = arenaMinX;
+    this.arenaMaxX = arenaMaxX;
+    this.groundY = groundY;
+    this.name = name;
+    this.alienText = alienText;
+    this.translatedText = translatedText;
+    this.introDone = false;
+    this.dead = false;
+    this.defeatHandled = false;
+    this.deathTimer = 0;
+    this.direction = 1;
+    this.hoverT = Math.random() * 10;
+    this.attackTimer = 1.6;
+    this.stageFlashTimer = 0;
+  }
+
+  get bounds() {
+    if (this.dead || !this.introDone) return null; // intangível antes da intro e depois de morto
+    return { x: this.x, y: this.y, width: this.width, height: this.height };
+  }
+
+  takeDamage(amount) {
+    if (this.dead || !this.introDone) return;
+    this.hp = Math.max(0, this.hp - amount);
+    const remaining = this.hp / this.maxHp;
+    if (this.stage === 0 && remaining <= BOSS_STAGE_THRESHOLDS[0]) {
+      this.stage = 1;
+      this.stageFlashTimer = 1;
+    } else if (this.stage === 1 && remaining <= BOSS_STAGE_THRESHOLDS[1]) {
+      this.stage = 2;
+      this.stageFlashTimer = 1;
+    }
+    if (this.hp <= 0) {
+      this.dead = true;
+      this.deathTimer = 1.4;
+    }
+  }
+
+  update(dt, player, projectiles, level) {
+    if (this.stageFlashTimer > 0) this.stageFlashTimer = Math.max(0, this.stageFlashTimer - dt);
+
+    if (this.dead) {
+      this.deathTimer = Math.max(0, this.deathTimer - dt);
+      return;
+    }
+    if (!this.introDone) return;
+
+    this.hoverT += dt;
+    this.y = this.groundY - this.height - 16 + Math.sin(this.hoverT) * 8;
+
+    this.x += BOSS_HOVER_SPEED * this.direction * dt;
+    if (this.x <= this.arenaMinX) {
+      this.x = this.arenaMinX;
+      this.direction = 1;
+    } else if (this.x + this.width >= this.arenaMaxX) {
+      this.x = this.arenaMaxX - this.width;
+      this.direction = -1;
+    }
+
+    this.attackTimer -= dt;
+    if (this.attackTimer <= 0) {
+      this.performAttack(player, projectiles, level);
+      this.attackTimer = BOSS_STAGE_ATTACK_COOLDOWN[this.stage];
+    }
+  }
+
+  performAttack(player, projectiles, level) {
+    const cx = this.x + this.width / 2;
+    const cy = this.y + this.height / 2;
+    const dir = Math.sign(player.x + player.width / 2 - cx) || 1;
+
+    if (this.stage === 0) {
+      // Estágio 1 (dentro do robô): solta uma criatura mirada na posição atual do jogador.
+      const originY = this.y + this.height * 0.75;
+      const dx = player.x + player.width / 2 - cx;
+      const dy = player.y + player.height / 2 - originY;
+      const dist = Math.hypot(dx, dy) || 1;
+      const speed = 210;
+      projectiles.push(new Projectile(cx, originY, (dx / dist) * speed, (dy / dist) * speed, 9, '#8a5cff'));
+    } else if (this.stage === 1) {
+      // Estágio 2 (armadura exposta): soco (rápido, curto alcance) ou bola de energia.
+      if (Math.random() < 0.5) {
+        projectiles.push(new Projectile(cx, cy, dir * 300, 0, 10, '#ff9d3d'));
+      } else {
+        projectiles.push(new Projectile(cx, this.y + this.height * 0.8, dir * 460, 0, 14, '#ff5b5b'));
+      }
+    } else {
+      // Estágio 3 (ejetado, nave alienígena): feixe de abdução numa posição aleatória
+      // da arena — reaproveita TractorBeam, que o motor já trata como perigo genérico.
+      level.tractorBeams = level.tractorBeams.filter((b) => b.state !== 'idle' || Math.random() > 0.4);
+      const margin = 40;
+      const beamX = this.arenaMinX + margin + Math.random() * Math.max(0, this.arenaMaxX - this.arenaMinX - margin * 2);
+      level.tractorBeams.push(new TractorBeam({ x: beamX, bottomY: this.groundY }));
+    }
+  }
+
+  draw(ctx, camera) {
+    if (!this.introDone) return;
+    const sx = Math.round(this.x - camera.x);
+    const sy = Math.round(this.y - camera.y);
+
+    if (this.dead) {
+      ctx.globalAlpha = Math.min(1, this.deathTimer / 1.4);
+      ctx.fillStyle = '#3a3f4a';
+      ctx.fillRect(sx, sy + this.height * 0.4, this.width, this.height * 0.6);
+      ctx.globalAlpha = 1;
+      return;
+    }
+
+    const flash = this.stageFlashTimer > 0 && Math.floor(this.stageFlashTimer * 16) % 2 === 0;
+    if (this.stage === 0) {
+      ctx.fillStyle = flash ? '#ffffff' : '#5c4a8a';
+      ctx.fillRect(sx, sy, this.width, this.height);
+      ctx.fillStyle = '#241a3d';
+      ctx.fillRect(sx + 10, sy + 14, this.width - 20, 22);
+    } else if (this.stage === 1) {
+      ctx.fillStyle = flash ? '#ffffff' : '#8a97a8';
+      ctx.fillRect(sx, sy, this.width, this.height);
+      ctx.fillStyle = '#ff9d3d';
+      ctx.fillRect(sx + this.width / 2 - 10, sy + 18, 20, 16);
+    } else {
+      ctx.fillStyle = flash ? '#ffffff' : '#2e7d5a';
+      ctx.beginPath();
+      ctx.ellipse(sx + this.width / 2, sy + this.height / 2, this.width / 2, this.height / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = '#ff3b3b';
+    ctx.beginPath();
+    ctx.arc(sx + this.width / 2 - 18, sy + this.height * 0.3, 6, 0, Math.PI * 2);
+    ctx.arc(sx + this.width / 2 + 18, sy + this.height * 0.3, 6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// Botão de pressão: fica `pressed` enquanto algo (jogador ou companheiro) estiver em
+// cima dele — quem faz essa checagem a cada frame é o motor (updatePressureGates em
+// game.js), que também abre/fecha o portão associado (ver createPressureGate).
+export class PressurePlate {
+  constructor({ x, y, width = 32, height = 8 }) {
+    this.x = x;
+    this.y = y;
+    this.width = width;
+    this.height = height;
+    this.pressed = false;
+  }
+
+  get bounds() {
+    return { x: this.x, y: this.y, width: this.width, height: this.height };
+  }
+
+  draw(ctx, camera) {
+    const sx = Math.round(this.x - camera.x);
+    const sy = Math.round(this.y - camera.y);
+    ctx.fillStyle = this.pressed ? '#3fae55' : '#8a97a8';
+    ctx.fillRect(sx, sy + (this.pressed ? 3 : 0), this.width, this.height - (this.pressed ? 3 : 0));
+    ctx.strokeStyle = '#2b2f3a';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(sx, sy, this.width, this.height);
+  }
 }
