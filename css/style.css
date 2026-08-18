@@ -1,0 +1,228 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #05060f;
+  font-family: 'Segoe UI', Tahoma, sans-serif;
+}
+
+#game-container {
+  position: relative;
+  line-height: 0;
+}
+
+#game-canvas {
+  background: #05060f;
+  image-rendering: pixelated;
+  border: 4px solid #5be6ff;
+  box-shadow: 0 0 24px rgba(91, 230, 255, 0.35);
+  max-width: 95vw;
+  height: auto;
+}
+
+#hud {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  color: #5be6ff;
+  font-weight: bold;
+  font-size: 18px;
+  font-family: 'Consolas', monospace;
+  text-shadow: 0 0 6px rgba(91, 230, 255, 0.8);
+  pointer-events: none;
+}
+
+#controls-hint {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 13px;
+  background: rgba(5, 6, 15, 0.6);
+  border: 1px solid rgba(91, 230, 255, 0.3);
+  padding: 6px 10px;
+  border-radius: 6px;
+  pointer-events: none;
+}
+
+#pause-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 3, 8, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#pause-overlay.hidden {
+  display: none;
+}
+
+#pause-card {
+  text-align: center;
+  color: #fff;
+  background: rgba(8, 12, 22, 0.96);
+  border: 1px solid rgba(91, 230, 255, 0.5);
+  border-radius: 10px;
+  padding: 24px 32px;
+  box-shadow: 0 0 24px rgba(91, 230, 255, 0.25);
+}
+
+#pause-card h2 {
+  font-size: 24px;
+  margin-bottom: 16px;
+  text-shadow: 0 0 10px rgba(91, 230, 255, 0.6);
+}
+
+#pause-controls {
+  font-size: 15px;
+  line-height: 1.8;
+  color: #dff7ff;
+  font-family: 'Consolas', monospace;
+  text-align: left;
+  display: inline-block;
+}
+
+#pause-hint {
+  margin-top: 18px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+#message-box {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(8, 12, 22, 0.92);
+  border: 1px solid rgba(91, 230, 255, 0.5);
+  color: #dff7ff;
+  padding: 16px 24px;
+  border-radius: 8px;
+  font-size: 18px;
+  font-family: 'Consolas', monospace;
+  line-height: 1.5;
+  max-width: 70%;
+  text-align: center;
+  box-shadow: 0 0 18px rgba(91, 230, 255, 0.25);
+}
+
+#message-box.hidden {
+  display: none;
+}
+
+#choice-box {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(8, 12, 22, 0.96);
+  border: 1px solid rgba(231, 159, 176, 0.6);
+  color: #fff;
+  padding: 20px 28px;
+  border-radius: 10px;
+  max-width: 75%;
+  text-align: center;
+  box-shadow: 0 0 24px rgba(231, 159, 176, 0.3);
+}
+
+#choice-box.hidden {
+  display: none;
+}
+
+#choice-text {
+  font-size: 18px;
+  margin-bottom: 16px;
+  line-height: 1.4;
+}
+
+.choice-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.choice-buttons button,
+#end-restart {
+  font-size: 15px;
+  padding: 10px 18px;
+  border-radius: 6px;
+  border: 1px solid rgba(91, 230, 255, 0.6);
+  background: #14202b;
+  color: #fff;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.choice-buttons button:hover,
+#end-restart:hover {
+  background: #1e3444;
+}
+
+#choice-help {
+  border-color: #7cff6b;
+}
+
+#choice-help:hover {
+  background: #1c3222;
+}
+
+#end-screen {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 3, 8, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#end-screen.hidden {
+  display: none;
+}
+
+#end-card {
+  text-align: center;
+  color: #fff;
+  max-width: 80%;
+  padding: 24px;
+}
+
+#end-title {
+  font-size: 32px;
+  margin-bottom: 12px;
+  text-shadow: 0 0 12px rgba(91, 230, 255, 0.6);
+}
+
+#end-stars {
+  font-size: 42px;
+  letter-spacing: 10px;
+  margin-bottom: 16px;
+}
+
+#end-stars.hidden {
+  display: none;
+}
+
+.star-filled {
+  color: #ffd93d;
+  text-shadow: 0 0 12px rgba(255, 217, 61, 0.8);
+}
+
+.star-empty {
+  color: #333a4a;
+}
+
+#end-text {
+  font-size: 16px;
+  line-height: 1.5;
+  margin-bottom: 20px;
+  color: #cfe9f0;
+}

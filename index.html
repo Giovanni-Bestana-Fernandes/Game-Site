@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fuga da Nave</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="game-canvas" width="960" height="540"></canvas>
+    <div id="hud">
+      <span id="energy-counter">Células de energia: 0</span>
+    </div>
+    <div id="message-box" class="hidden"></div>
+
+    <div id="choice-box" class="hidden">
+      <p id="choice-text"></p>
+      <div class="choice-buttons">
+        <button id="choice-help" type="button">🐄 Ajudar as vacas</button>
+        <button id="choice-refuse" type="button">Seguir sozinho</button>
+      </div>
+    </div>
+
+    <div id="end-screen" class="hidden">
+      <div id="end-card">
+        <h1 id="end-title"></h1>
+        <div id="end-stars" class="hidden"></div>
+        <p id="end-text"></p>
+        <button id="end-restart" type="button">Tentar novamente</button>
+      </div>
+    </div>
+
+    <div id="controls-hint">Pressione ESC para ver os comandos</div>
+
+    <div id="pause-overlay" class="hidden">
+      <div id="pause-card">
+        <h2>Pausado</h2>
+        <div id="pause-controls">
+          <strong>Controles</strong><br />
+          A / D — mover · S — agachar<br />
+          W / Espaço — pular · Shift — correr<br />
+          E — interagir · F — atirar<br />
+          Q / W / E (segurando + F) — mirar diagonal / reto-cima / diagonal
+        </div>
+        <p id="pause-hint">Pressione ESC para continuar</p>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
